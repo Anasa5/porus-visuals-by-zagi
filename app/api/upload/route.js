@@ -15,7 +15,6 @@ export async function POST(request) {
     return jsonError(500, "supabase_not_configured", "SUPABASE_SERVICE_ROLE_KEY is missing from .env.local.");
   }
 
-  // Read form data
   let formData;
   try {
     formData = await request.formData();
@@ -30,7 +29,6 @@ export async function POST(request) {
   const tagsRaw = formData.get("tags");
   const thumbnailFile = formData.get("thumbnail"); // optional
 
-  // Validate required fields
   if (!file || typeof file === "string") {
     return jsonError(400, "missing_file", "No file was uploaded.");
   }
@@ -43,9 +41,7 @@ export async function POST(request) {
 
   // Upload the main file to Cloudinary
   const buffer = Buffer.from(await file.arrayBuffer());
-  const mime = file.type || "";
-  const resourceType = pickCloudinaryResourceType(mime);
-  const assetType = pickAssetType(mime, file.name);
+  const { resourceType, assetType } = classifyFile(file.type || "", file.name);
 
   let uploadResult;
   try {
@@ -58,14 +54,11 @@ export async function POST(request) {
     return jsonError(502, "cloudinary_upload_failed", err?.message || "Cloudinary upload failed.");
   }
 
-  // -------------------------------------------------------------------------
-  // Build the preview URL
-  // Priority:  custom thumbnail  >  the image itself (only for images)  >  null
-  // -------------------------------------------------------------------------
+  // Preview priority: custom thumbnail > the image itself (only for images) > null.
+  // Video/audio/font without a custom thumbnail stay null — AssetThumbnail shows a type icon.
   let previewUrl = null;
 
   if (thumbnailFile && typeof thumbnailFile !== "string") {
-    // Custom thumbnail uploaded — send it to Cloudinary as an image.
     try {
       const thumbBuffer = Buffer.from(await thumbnailFile.arrayBuffer());
       const thumbResult = await uploadBufferToCloudinary(thumbBuffer, {
@@ -79,15 +72,8 @@ export async function POST(request) {
       console.error("Thumbnail upload failed:", err?.message);
     }
   } else if (assetType === "png") {
-    // No custom thumbnail, but the file itself is an image — use it as preview.
     previewUrl = uploadResult.secure_url;
   }
-  // For video/audio/font without a custom thumbnail, preview stays null →
-  // the AssetThumbnail component shows the type icon.
-
-  // Insert into Supabase
-  const fileFormat = getFileExtension(file.name).toUpperCase();
-  const tags = parseTags(tagsRaw);
 
   const { data, error } = await supabaseAdmin
     .from("assets")
@@ -96,11 +82,11 @@ export async function POST(request) {
       description: description?.trim() || null,
       asset_type: assetType,
       category: category.trim().toLowerCase(),
-      tags,
+      tags: parseTags(tagsRaw),
       file_url: uploadResult.secure_url,
       preview_url: previewUrl,
       file_size: file.size,
-      file_format: fileFormat,
+      file_format: getFileExtension(file.name).toUpperCase(),
       download_count: 0,
       is_published: true,
       uploaded_at: new Date().toISOString(),
@@ -113,7 +99,7 @@ export async function POST(request) {
   }
 
   // Invalidate cached pages so the new asset appears immediately.
-    revalidateTag("assets");
+  revalidateTag("assets");
   revalidatePath("/");
   revalidatePath("/admin");
 
@@ -148,19 +134,15 @@ function jsonError(status, error, message) {
   );
 }
 
-function pickCloudinaryResourceType(mime) {
-  if (mime.startsWith("image/")) return "image";
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "video";
-  return "raw";
-}
-
-function pickAssetType(mime, filename) {
-  if (mime.startsWith("video/")) return "video";
-  if (mime.startsWith("audio/")) return "audio";
-  if (mime.startsWith("image/")) return "png";
-  if (/\.(ttf|otf|woff2?)$/i.test(filename)) return "font";
-  return "png";
+// Single pass over the mime/filename instead of two separate functions
+// that each re-derived the same category.
+function classifyFile(mime, filename) {
+  if (mime.startsWith("video/")) return { resourceType: "video", assetType: "video" };
+  if (mime.startsWith("audio/")) return { resourceType: "video", assetType: "audio" }; // Cloudinary treats audio as "video"
+  if (mime.startsWith("image/")) return { resourceType: "image", assetType: "png" };
+  if (/\.(ttf|otf|woff2?)$/i.test(filename)) return { resourceType: "raw", assetType: "font" };
+  // Fallback for anything unrecognized — keeps prior behavior (treated as "png"/raw).
+  return { resourceType: "raw", assetType: "png" };
 }
 
 function slugify(str) {
