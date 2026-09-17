@@ -1,104 +1,122 @@
 // app/api/download/route.js
 // GET /api/download?id=<asset-id>
-// Placeholder endpoint for the future asset download flow.
-// Real implementation (Supabase lookup + Cloudinary redirect) comes later.
+// Increments the download counter and redirects to the file.
 
 import { NextResponse } from "next/server";
+import { revalidateTag } from "next/cache";
+import { supabaseAdmin } from "../../../lib/supabase";
 
-// ---------------------------------------------------------------------------
-// GET
-// Validates the query string, then returns 501 Not Implemented.
-// The validation logic stays in the real version — only the final response
-// block will change.
-// ---------------------------------------------------------------------------
 export async function GET(request) {
-  // Read ?id=<asset-id> from the URL.
-  // `request.url` is the full URL, so `new URL()` lets us use .searchParams.
+  if (!supabaseAdmin) {
+    return jsonError(500, "supabase_not_configured", "Server isn't fully configured.");
+  }
+
   const { searchParams } = new URL(request.url);
   const id = searchParams.get("id");
 
-  // ── Missing or empty id ───────────────────────────────────────────────
-  // This is a real error the caller made — 400 is the correct status.
-  if (!id || id.trim() === "") {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "missing_id",
-        message: "Provide an asset id via the ?id= query parameter.",
-      },
-      {
-        status: 400,
-        headers: { "Cache-Control": "no-store" },
-      }
-    );
+  if (!id) {
+    return jsonError(400, "missing_id", "Provide an asset id via ?id=");
   }
 
-  // ── Placeholder response ──────────────────────────────────────────────
-  // When the real implementation lands, this block becomes:
-  //
-  //   const { data: asset } = await supabase
-  //     .from("assets")
-  //     .select("*")
-  //     .eq("id", id)
-  //     .single();
-  //
-  //   if (!asset) return notFound();
-  //
-  //   // Increment download counter, then redirect to Cloudinary:
-  //   await supabase.rpc("increment_downloads", { asset_id: id });
-  //   return NextResponse.redirect(asset.file_url);
-  //
+  const numericId = Number(id);
+  if (!Number.isFinite(numericId)) {
+    return jsonError(400, "invalid_id", "Asset id must be a number.");
+  }
+
+  // Fetch the asset (need file_url + title + current count).
+  const { data: asset, error } = await supabaseAdmin
+    .from("assets")
+    .select("id, title, file_url, download_count")
+    .eq("id", numericId)
+    .eq("is_published", true)
+    .maybeSingle();
+
+  if (error) {
+    return jsonError(500, "db_error", error.message);
+  }
+  if (!asset) {
+    return jsonError(404, "not_found", "Asset doesn't exist or isn't published.");
+  }
+
+  // Increment the counter. Best-effort — if this fails, we still serve the file.
+  try {
+    await supabaseAdmin
+      .from("assets")
+      .update({ download_count: (asset.download_count ?? 0) + 1 })
+      .eq("id", numericId);
+
+    // Invalidate cached pages so Trending + admin stats pick up the new count.
+    revalidateTag("assets");
+  } catch (err) {
+    console.error("Failed to increment download count:", err?.message);
+  }
+
+  // Build the final URL, adding fl_attachment for Cloudinary files.
+  const finalUrl = buildDownloadUrl(asset.file_url, asset.title);
+
+  // Redirect the browser to the file. Cloudinary will send
+  // Content-Disposition: attachment (because of fl_attachment) so the browser
+  // downloads it instead of opening it in a tab.
+  return NextResponse.redirect(finalUrl, 302);
+}
+
+// ---------------------------------------------------------------------------
+// METHOD GUARDS
+// ---------------------------------------------------------------------------
+export async function POST() { return methodNotAllowed(); }
+export async function PUT() { return methodNotAllowed(); }
+export async function DELETE() { return methodNotAllowed(); }
+export async function PATCH() { return methodNotAllowed(); }
+
+function methodNotAllowed() {
   return NextResponse.json(
-    {
-      ok: false,
-      error: "not_implemented",
-      message:
-        "Download endpoint is not wired up yet. Supabase lookup and Cloudinary delivery coming soon.",
-      receivedId: id,
-    },
-    {
-      status: 501,
-      headers: { "Cache-Control": "no-store" },
-    }
+    { ok: false, error: "method_not_allowed" },
+    { status: 405, headers: { Allow: "GET", "Cache-Control": "no-store" } }
   );
 }
 
 // ---------------------------------------------------------------------------
-// METHOD GUARD
-// Downloads are read-only, so only GET is allowed. Everything else gets 405.
+// HELPERS
 // ---------------------------------------------------------------------------
-export async function POST() {
-  return methodNotAllowed();
-}
-
-export async function PUT() {
-  return methodNotAllowed();
-}
-
-export async function DELETE() {
-  return methodNotAllowed();
-}
-
-export async function PATCH() {
-  return methodNotAllowed();
-}
-
-// ---------------------------------------------------------------------------
-// HELPER
-// ---------------------------------------------------------------------------
-function methodNotAllowed() {
+function jsonError(status, error, message) {
   return NextResponse.json(
-    {
-      ok: false,
-      error: "method_not_allowed",
-      message: "Use GET to download an asset.",
-    },
-    {
-      status: 405,
-      headers: {
-        Allow: "GET",
-        "Cache-Control": "no-store",
-      },
-    }
+    { ok: false, error, message },
+    { status, headers: { "Cache-Control": "no-store" } }
+  );
+}
+
+// Add a Cloudinary transform that forces an attachment download.
+// Skips raw resources — Cloudinary 404s on transformed raw URLs, and fonts
+// / some audio uploads are stored as raw.
+function buildDownloadUrl(url, title) {
+  if (!url || typeof url !== "string") return url;
+  if (!url.includes("res.cloudinary.com")) return url;
+  if (url.includes("/raw/upload/")) return url;
+
+  const safeName = slugifyFilename(title);
+  const transform = `fl_attachment:${safeName}`;
+
+  const marker = "/upload/";
+  const idx = url.indexOf(marker);
+  if (idx === -1) return url;
+
+  const base = url.slice(0, idx + marker.length);
+  const rest = url.slice(idx + marker.length);
+
+  // Already transformed — don't double up.
+  if (rest.startsWith("fl_attachment")) return url;
+
+  return `${base}${transform}/${rest}`;
+}
+
+// Cloudinary's fl_attachment only accepts a restricted filename.
+function slugifyFilename(title) {
+  return (
+    String(title || "download")
+      .normalize("NFKD")
+      .replace(/[^a-zA-Z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 80)
+      .toLowerCase() || "download"
   );
 }

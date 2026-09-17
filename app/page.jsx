@@ -1,12 +1,15 @@
 // app/page.jsx
-// Homepage — Server Component.
+// Homepage — Server Component. URL-driven search, sort, and pagination.
 
 import Link from "next/link";
 import { unstable_cache } from "next/cache";
 import AssetCard from "../components/AssetCard";
+import SortDropdown from "../components/SortDropdown";
 import { supabaseAdmin } from "../lib/supabase";
 
 export const dynamic = "force-dynamic";
+
+const PAGE_SIZE = 24;
 
 // ---------------------------------------------------------------------------
 // ICONS
@@ -129,17 +132,50 @@ const CATEGORIES = [
   { label: "Animations",  value: "animations",  Icon: IconSparkle },
   { label: "SFX",         value: "sfx",         Icon: IconWave },
   { label: "Fonts",       value: "fonts",       Icon: IconFont },
-  { label: "Trending",    value: "trending",    Icon: IconFlame, special: true },
+  { label: "Trending",    value: "trending",    Icon: IconFlame },
 ];
+
+const SORT_LABELS = {
+  newest: "Newest",
+  oldest: "Oldest",
+  downloads: "Most downloaded",
+  az: "A–Z",
+};
+
+// ---------------------------------------------------------------------------
+// URL HELPERS
+// ---------------------------------------------------------------------------
+
+// URLs can carry a param multiple times (?q=a&q=b) — take the first.
+function firstParam(value) {
+  if (Array.isArray(value)) return value[0];
+  return typeof value === "string" ? value : "";
+}
+
+// Build a homepage URL from a state object. Omits defaults so links stay clean.
+function buildUrl({ category, q, sort, show }) {
+  const sp = new URLSearchParams();
+  if (category) sp.set("category", category);
+  if (q) sp.set("q", q);
+  if (sort && sort !== "newest") sp.set("sort", sort);
+  if (show && show > PAGE_SIZE) sp.set("show", String(show));
+  const qs = sp.toString();
+  return qs ? `/?${qs}` : "/";
+}
+
+// Strip characters that would break PostgREST's .or() filter syntax.
+function sanitizeSearchTerm(q) {
+  return q.replace(/[,()]/g, " ").trim();
+}
 
 // ---------------------------------------------------------------------------
 // DATA
 // ---------------------------------------------------------------------------
 const CARDS_COLUMNS =
-  "id, title, category, asset_type, file_format, tags, preview_url, uploaded_at";
+  "id, title, category, asset_type, file_format, tags, preview_url, uploaded_at, download_count";
 
 const getCachedAssets = unstable_cache(
-  async (category) => {
+  async (category, search, sort, show) => {
     if (!supabaseAdmin) return [];
 
     let query = supabaseAdmin
@@ -147,22 +183,45 @@ const getCachedAssets = unstable_cache(
       .select(CARDS_COLUMNS)
       .eq("is_published", true);
 
-    if (category === "trending") {
+    // Category filter (skip "all" and "trending" — trending is a sort, not a filter)
+    if (category && category !== "all" && category !== "trending") {
+      query = query.eq("category", category);
+    }
+
+    // Search across title and description
+    if (search) {
+      query = query.or(
+        `title.ilike.%${search}%,description.ilike.%${search}%`
+      );
+    }
+
+    // Sort
+    if (category === "trending" || sort === "downloads") {
       query = query.order("download_count", { ascending: false });
-    } else if (category && category !== "all") {
-      query = query
-        .eq("category", category)
-        .order("uploaded_at", { ascending: false });
+    } else if (sort === "oldest") {
+      query = query.order("uploaded_at", { ascending: true });
+    } else if (sort === "az") {
+      query = query.order("title", { ascending: true });
     } else {
+      // newest (default)
       query = query.order("uploaded_at", { ascending: false });
     }
 
-    const { data, error } = await query.limit(24);
+    // Fetch one extra to know whether a "Load more" button is needed.
+    const { data, error } = await query.limit(show + 1);
+
     if (error) {
       console.error("Failed to load assets:", error.message);
-      return [];
+      return { rows: [], hasMore: false };
     }
-    return data ?? [];
+
+    const rows = data ?? [];
+    const hasMore = rows.length > show;
+
+    return {
+      rows: hasMore ? rows.slice(0, show) : rows,
+      hasMore,
+    };
   },
   ["home-assets"],
   { revalidate: 300, tags: ["assets"] }
@@ -194,15 +253,59 @@ function labelForCategory(value) {
 // PAGE
 // ---------------------------------------------------------------------------
 export default async function HomePage({ searchParams }) {
-  const rawCategory = searchParams?.category;
-  const activeCategory =
-    typeof rawCategory === "string" && rawCategory.length > 0
-      ? rawCategory.toLowerCase()
-      : null;
+  // Read URL state
+  const rawCategory = firstParam(searchParams?.category);
+  const rawQ = firstParam(searchParams?.q);
+  const rawSort = firstParam(searchParams?.sort);
+  const rawShow = firstParam(searchParams?.show);
 
-  const rows = await getCachedAssets(activeCategory ?? "all");
+  const category =
+    rawCategory && rawCategory.length > 0 ? rawCategory.toLowerCase() : null;
+  const q = rawQ && rawQ.trim().length > 0 ? rawQ.trim() : null;
+  const sort =
+    rawSort && ["newest", "oldest", "downloads", "az"].includes(rawSort)
+      ? rawSort
+      : "newest";
+  const show = Math.max(
+    PAGE_SIZE,
+    Math.min(parseInt(rawShow, 10) || PAGE_SIZE, 240)
+  );
+
+  // Fetch
+  const safeSearch = q ? sanitizeSearchTerm(q) : "";
+  const { rows, hasMore } = await getCachedAssets(
+    category ?? "all",
+    safeSearch,
+    sort,
+    show
+  );
   const assets = rows.map(toCardShape);
-  const activeLabel = labelForCategory(activeCategory);
+
+  const activeLabel = labelForCategory(category);
+  const state = { category, q, sort, show };
+
+  // Section title logic
+  let sectionTitle;
+  let sectionSubtitle;
+
+  if (q) {
+    sectionTitle = `Results for "${q}"`;
+    sectionSubtitle =
+      assets.length === 0
+        ? "No matches"
+        : `${assets.length} result${assets.length === 1 ? "" : "s"}`;
+  } else if (category === "trending") {
+    sectionTitle = "Trending";
+    sectionSubtitle = "Most downloaded";
+  } else if (category) {
+    sectionTitle = activeLabel;
+    sectionSubtitle = `Everything in ${activeLabel}`;
+  } else {
+    sectionTitle = "Latest Resources";
+    sectionSubtitle = "Fresh drops from the treasury";
+  }
+
+  const hasActiveFilter = Boolean(category || q || sort !== "newest");
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20 lg:px-8">
@@ -246,22 +349,19 @@ export default async function HomePage({ searchParams }) {
             </Link>
           </nav>
 
-          <button
-            type="button"
+          <Link
+            href="/#search"
             aria-label="Search"
             className="flex h-9 w-9 items-center justify-center rounded-lg border border-line bg-surface text-text-secondary outline-none transition hover:border-line-strong hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-95"
           >
             <SearchIcon className="h-4 w-4" />
-          </button>
+          </Link>
         </div>
       </header>
 
-      {/* ==================================================================
-          HERO — bordered panel
-      ================================================================== */}
+      {/* HERO */}
       <section className="mt-6 sm:mt-8">
         <div className="relative overflow-hidden rounded-2xl border border-line bg-surface/60 p-5 shadow-card sm:p-8 lg:p-10">
-          {/* subtle inner accent glow */}
           <div
             aria-hidden="true"
             className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-accent/15 blur-3xl"
@@ -286,27 +386,36 @@ export default async function HomePage({ searchParams }) {
               and fonts — built for video and content editors.
             </p>
 
-            <div className="mt-6 flex items-center gap-2 rounded-xl border border-line bg-background/60 p-1.5 pl-3.5 transition focus-within:border-accent/50 sm:mt-7 sm:max-w-lg">
+            {/* Search form — GET submit, preserves other URL params via hidden inputs */}
+            <form
+              id="search"
+              action="/"
+              method="GET"
+              className="mt-6 flex items-center gap-2 rounded-xl border border-line bg-background/60 p-1.5 pl-3.5 transition focus-within:border-accent/50 sm:mt-7 sm:max-w-lg"
+            >
+              {category && <input type="hidden" name="category" value={category} />}
+              {sort !== "newest" && <input type="hidden" name="sort" value={sort} />}
+
               <SearchIcon className="h-4 w-4 shrink-0 text-text-secondary" />
               <input
                 type="text"
+                name="q"
+                defaultValue={q ?? ""}
                 placeholder="Search light leaks, SFX, fonts…"
                 className="min-w-0 flex-1 bg-transparent py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
               />
               <button
-                type="button"
+                type="submit"
                 className="shrink-0 rounded-lg bg-accent px-3 py-2 text-xs font-semibold text-white outline-none transition hover:bg-accent-dark focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-95 sm:px-4 sm:text-sm"
               >
                 Search
               </button>
-            </div>
+            </form>
           </div>
         </div>
       </section>
 
-      {/* ==================================================================
-          CATEGORIES — bordered panel
-      ================================================================== */}
+      {/* CATEGORIES */}
       <section id="categories" className="mt-4 scroll-mt-20 sm:mt-5">
         <div className="rounded-2xl border border-line bg-surface/60 p-4 shadow-card sm:p-5">
           <div className="mb-3 flex items-center justify-between">
@@ -321,8 +430,14 @@ export default async function HomePage({ searchParams }) {
           <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             <div className="flex w-max gap-2 px-1">
               {CATEGORIES.map(({ label, value, Icon: CategoryIcon }) => {
-                const isActive = activeCategory === value;
-                const href = value ? `/?category=${value}` : "/";
+                const isActive = (category ?? null) === value;
+                // Changing category resets pagination, keeps search + sort.
+                const href = buildUrl({
+                  category: value,
+                  q,
+                  sort,
+                  show: PAGE_SIZE,
+                });
 
                 return (
                   <Link
@@ -345,70 +460,100 @@ export default async function HomePage({ searchParams }) {
         </div>
       </section>
 
-      {/* ==================================================================
-          LATEST RESOURCES — bordered panel with header divider
-      ================================================================== */}
+      {/* ASSETS */}
       <section id="latest" className="mt-4 scroll-mt-20 sm:mt-5">
         <div className="overflow-hidden rounded-2xl border border-line bg-surface/60 shadow-card">
           {/* Header */}
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-line px-5 py-4 sm:px-6 sm:py-5">
-            <div>
-              <h2 className="text-base font-semibold tracking-tight text-text-primary sm:text-lg">
-                {activeCategory ? activeLabel : "Latest Resources"}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-5">
+            <div className="min-w-0">
+              <h2 className="truncate text-base font-semibold tracking-tight text-text-primary sm:text-lg">
+                {sectionTitle}
               </h2>
-              <p className="mt-0.5 text-xs text-text-secondary sm:text-[13px]">
-                {activeCategory === "trending"
-                  ? "Most downloaded"
-                  : activeCategory
-                  ? `Everything in ${activeLabel}`
-                  : "Fresh drops from the treasury"}
+              <p className="mt-0.5 truncate text-xs text-text-secondary sm:text-[13px]">
+                {sectionSubtitle}
               </p>
             </div>
 
-            {activeCategory && (
-              <Link
-                href="/"
-                scroll={false}
-                className="shrink-0 rounded-lg border border-line bg-background/60 px-3 py-1.5 text-xs font-medium text-text-secondary outline-none transition hover:border-line-strong hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
-              >
-                Clear filter
-              </Link>
-            )}
+            <div className="flex shrink-0 items-center gap-2">
+              <SortDropdown
+                value={sort}
+                currentCategory={category}
+                currentQ={q}
+              />
+              {hasActiveFilter && (
+                <Link
+                  href="/"
+                  scroll={false}
+                  className="rounded-lg border border-line bg-background/60 px-2.5 py-1.5 text-xs font-medium text-text-secondary outline-none transition hover:border-line-strong hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60"
+                >
+                  Reset
+                </Link>
+              )}
+            </div>
           </div>
 
           {/* Content */}
-          <div className="p-5 sm:p-6">
+          <div className="p-4 sm:p-6">
             {assets.length === 0 ? (
               <div className="rounded-xl border border-dashed border-line-strong bg-background/40 px-6 py-10 text-center sm:py-12">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 text-accent-soft">
                   <LayersIcon className="h-5 w-5" />
                 </div>
                 <h3 className="mt-3 text-sm font-semibold tracking-tight text-text-primary sm:text-base">
-                  {activeCategory
+                  {q
+                    ? `No matches for "${q}"`
+                    : category
                     ? `Nothing in ${activeLabel} yet`
                     : "Nothing here yet"}
                 </h3>
                 <p className="mx-auto mt-1.5 max-w-sm text-xs leading-relaxed text-text-secondary sm:text-sm">
-                  {activeCategory
+                  {q
+                    ? "Try a different word, or clear the search to see everything."
+                    : category
                     ? `No ${activeLabel.toLowerCase()} have been uploaded yet. Check back soon.`
                     : "No assets have been uploaded yet. Check back soon."}
                 </p>
-                {activeCategory && (
+                {hasActiveFilter && (
                   <Link
                     href="/"
                     scroll={false}
                     className="mt-4 inline-flex items-center gap-1.5 rounded-lg border border-line bg-surface px-3.5 py-2 text-xs font-semibold text-text-secondary outline-none transition hover:border-line-strong hover:text-text-primary focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.99] sm:text-sm"
                   >
-                    View all assets
+                    Clear filters
                   </Link>
                 )}
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
-                {assets.map((asset, i) => (
-                  <AssetCard key={asset.id} asset={asset} priority={i < 4} />
-                ))}
-              </div>
+              <>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+                  {assets.map((asset, i) => (
+                    <AssetCard key={asset.id} asset={asset} priority={i < 4} />
+                  ))}
+                </div>
+
+                {/* Load more */}
+                {hasMore && (
+                  <div className="mt-6 flex justify-center sm:mt-8">
+                    <Link
+                      href={buildUrl({ ...state, show: show + PAGE_SIZE })}
+                      scroll={false}
+                      className="inline-flex items-center gap-2 rounded-xl border border-line bg-background/60 px-5 py-2.5 text-sm font-semibold text-text-primary outline-none transition hover:border-accent/50 hover:bg-surface focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.99]"
+                    >
+                      Load more
+                      <span className="text-text-secondary">
+                        ({PAGE_SIZE} more)
+                      </span>
+                    </Link>
+                  </div>
+                )}
+
+                {/* End-of-list note */}
+                {!hasMore && assets.length >= PAGE_SIZE && (
+                  <p className="mt-6 text-center text-xs text-text-secondary sm:mt-8">
+                    You've reached the end.
+                  </p>
+                )}
+              </>
             )}
           </div>
         </div>
