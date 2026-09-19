@@ -10,6 +10,17 @@ import { supabaseAdmin } from "../../lib/supabase";
 export const dynamic = "force-dynamic";
 
 // ---------------------------------------------------------------------------
+// CATEGORY DEFINITIONS (must match homepage pills)
+// ---------------------------------------------------------------------------
+const CATEGORY_DEFS = [
+  { value: "background-motion",    label: "Background motion" },
+  { value: "background-wallpaper", label: "Background wallpaper" },
+  { value: "trending-effect",      label: "Trending effect" },
+  { value: "sound-effects",        label: "Sound effects" },
+  { value: "transition-effect",    label: "Transition effect" },
+];
+
+// ---------------------------------------------------------------------------
 // ICONS
 // ---------------------------------------------------------------------------
 function Icon({ className, strokeWidth = 1.8, children }) {
@@ -85,6 +96,13 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
+function humanCategory(slug) {
+  const found = CATEGORY_DEFS.find((c) => c.value === slug);
+  if (found) return found.label;
+  // Fallback for old data
+  return slug ? slug.replace(/-/g, " ") : "—";
+}
+
 function formatBytes(bytes) {
   if (!bytes || typeof bytes !== "number") return "—";
   if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
@@ -112,7 +130,13 @@ function relativeTime(iso) {
 // ---------------------------------------------------------------------------
 async function getStats() {
   if (!supabaseAdmin) {
-    return { total: 0, downloads: 0, categories: 0, newThisWeek: 0 };
+    return {
+      total: 0,
+      downloads: 0,
+      categories: 0,
+      newThisWeek: 0,
+      byCategory: {},
+    };
   }
 
   const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
@@ -127,6 +151,15 @@ async function getStats() {
     supabaseAdmin.from("assets").select("download_count").limit(100000),
   ]);
 
+  // Build a count map per category.
+  const byCategory = {};
+  for (const def of CATEGORY_DEFS) byCategory[def.value] = 0;
+  for (const row of catRes.data ?? []) {
+    if (row.category && byCategory[row.category] !== undefined) {
+      byCategory[row.category]++;
+    }
+  }
+
   return {
     total: totalRes.count ?? 0,
     newThisWeek: newRes.count ?? 0,
@@ -137,6 +170,7 @@ async function getStats() {
       (s, r) => s + (r.download_count ?? 0),
       0
     ),
+    byCategory,
   };
 }
 
@@ -218,30 +252,23 @@ export default async function AdminPage() {
         </div>
       </header>
 
-      {/* ==================================================================
-          PAGE HEADER — bordered panel
-      ================================================================== */}
+      {/* Page header */}
       <section className="mt-6 sm:mt-8">
         <div className="rounded-2xl border border-line bg-surface/60 p-5 shadow-card sm:p-6 lg:p-8">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-soft">
-              <span className="h-1.5 w-1.5 rounded-full bg-accent" />
-              Admin
-            </span>
-          </div>
-
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-[11px] font-medium text-accent-soft">
+            <span className="h-1.5 w-1.5 rounded-full bg-accent" />
+            Admin
+          </span>
           <h1 className="mt-3 text-2xl font-bold tracking-tight text-text-primary sm:text-3xl">
             Dashboard
           </h1>
           <p className="mt-1.5 max-w-xl text-sm text-text-secondary sm:text-[15px]">
-            Upload new assets and manage the treasury.
+            Upload assets, monitor the library, and see what's live.
           </p>
         </div>
       </section>
 
-      {/* ==================================================================
-          STATS — bordered panel with grid
-      ================================================================== */}
+      {/* Stats */}
       <section className="mt-4 sm:mt-5">
         <div className="rounded-2xl border border-line bg-surface/60 p-4 shadow-card sm:p-5">
           <div className="mb-4 flex items-center justify-between">
@@ -279,21 +306,55 @@ export default async function AdminPage() {
         </div>
       </section>
 
-      {/* ==================================================================
-          MAIN GRID — form (left) + recent uploads (right)
-      ================================================================== */}
+      {/* By-category breakdown */}
+      <section className="mt-4 sm:mt-5">
+        <div className="rounded-2xl border border-line bg-surface/60 p-4 shadow-card sm:p-5">
+          <div className="mb-4 flex items-center justify-between">
+            <h2 className="text-sm font-semibold tracking-tight text-text-primary sm:text-base">
+              By category
+            </h2>
+            <span className="text-[11px] text-text-secondary sm:text-xs">
+              {CATEGORY_DEFS.length} categories
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {CATEGORY_DEFS.map((cat) => {
+              const count = stats.byCategory[cat.value] ?? 0;
+              return (
+                <Link
+                  key={cat.value}
+                  href={`/?category=${cat.value}`}
+                  className="group flex items-center justify-between gap-3 rounded-xl border border-line bg-background/60 px-3.5 py-2.5 outline-none transition hover:border-line-strong hover:bg-background focus-visible:ring-2 focus-visible:ring-accent/60"
+                >
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-medium text-text-primary">
+                      {cat.label}
+                    </p>
+                    <p className="mt-0.5 truncate text-[10px] text-text-secondary">
+                      {cat.value}
+                    </p>
+                  </div>
+                  <span className="shrink-0 rounded-lg border border-line bg-surface px-2 py-1 text-[11px] font-semibold tabular-nums text-text-primary transition group-hover:border-accent/40 group-hover:text-accent-soft">
+                    {count}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
+      {/* Main grid */}
       <section className="mt-4 grid grid-cols-1 gap-4 sm:mt-5 lg:grid-cols-5 lg:gap-5">
-        {/* --------------------------- Upload form ---------------------- */}
         <div className="lg:col-span-3">
           <div className="rounded-2xl border border-line bg-surface/60 p-1 shadow-card">
             <UploadForm />
           </div>
         </div>
 
-        {/* --------------------------- Recent uploads ------------------- */}
         <aside className="lg:col-span-2">
           <div className="overflow-hidden rounded-2xl border border-line bg-surface/60 shadow-card">
-            {/* Header */}
             <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-3.5 sm:px-5 sm:py-4">
               <div className="min-w-0">
                 <h2 className="text-sm font-semibold text-text-primary sm:text-base">
@@ -309,7 +370,6 @@ export default async function AdminPage() {
               </div>
             </div>
 
-            {/* Content */}
             {uploads.length === 0 ? (
               <div className="px-5 py-10 text-center sm:px-6 sm:py-12">
                 <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-xl bg-accent/10 text-accent-soft">
@@ -348,7 +408,7 @@ export default async function AdminPage() {
                             {asset.title}
                           </p>
                           <p className="mt-0.5 truncate text-[11px] text-text-secondary">
-                            {capitalize(asset.category ?? "")} ·{" "}
+                            {humanCategory(asset.category)} ·{" "}
                             {formatBytes(asset.file_size)} ·{" "}
                             {relativeTime(
                               asset.uploaded_at ?? asset.created_at

@@ -5,9 +5,6 @@ import { useRef, useState } from "react";
 
 // ---------------------------------------------------------------------------
 // FILE FILTERING
-// Only these extensions are accepted. Anything else is skipped with a count.
-// Prevents accidental selection of system files, .git contents, node_modules,
-// documents, etc. when selecting a whole folder.
 // ---------------------------------------------------------------------------
 const SUPPORTED_EXTENSIONS = new Set([
   // Images
@@ -20,7 +17,6 @@ const SUPPORTED_EXTENSIONS = new Set([
   "ttf", "otf", "woff", "woff2",
 ]);
 
-// System files that some OSes inject into folders — always skip these.
 const BLOCKED_FILENAMES = new Set([
   ".ds_store", "thumbs.db", "desktop.ini", "icon\r",
 ]);
@@ -28,96 +24,102 @@ const BLOCKED_FILENAMES = new Set([
 // ---------------------------------------------------------------------------
 // ICONS
 // ---------------------------------------------------------------------------
+function Icon({ className, strokeWidth = 1.8, children }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
 
-function UploadCloudIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M16 16l-4-4-4 4" />
-      <path d="M12 12v9" />
-      <path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A7 7 0 1 0 5 15" />
-    </svg>
-  );
-}
-function FileIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
-      <path d="M14 3v5h5" />
-    </svg>
-  );
-}
-function FolderIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-    </svg>
-  );
-}
-function CheckIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="m5 12.5 4.5 4.5L19 7" />
-    </svg>
-  );
-}
-function CloseIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M6 6l12 12" />
-      <path d="M18 6 6 18" />
-    </svg>
-  );
-}
-function SpinnerIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
-      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
-      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
-    </svg>
-  );
-}
-function AlertIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8v4" />
-      <path d="M12 16h.01" />
-    </svg>
-  );
-}
-function RefreshIcon({ className }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden="true">
-      <path d="M21 12a9 9 0 1 1-2.6-6.3" />
-      <path d="M21 4v5h-5" />
-    </svg>
-  );
-}
+const UploadCloudIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={1.7}>
+    <path d="M16 16l-4-4-4 4" />
+    <path d="M12 12v9" />
+    <path d="M20.4 16.6A5 5 0 0 0 18 7h-1.3A7 7 0 1 0 5 15" />
+  </Icon>
+);
+
+const FileIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={1.7}>
+    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5Z" />
+    <path d="M14 3v5h5" />
+  </Icon>
+);
+
+const FolderIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={1.7}>
+    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+  </Icon>
+);
+
+const CheckIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={2.4}>
+    <path d="m5 12.5 4.5 4.5L19 7" />
+  </Icon>
+);
+
+const CloseIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={2}>
+    <path d="M6 6l12 12" />
+    <path d="M18 6 6 18" />
+  </Icon>
+);
+
+const SpinnerIcon = ({ className }) => (
+  <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
+    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="2.5" opacity="0.25" />
+    <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" />
+  </svg>
+);
+
+const AlertIcon = ({ className }) => (
+  <Icon className={className}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 8v4" />
+    <path d="M12 16h.01" />
+  </Icon>
+);
+
+const RefreshIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={1.9}>
+    <path d="M21 12a9 9 0 1 1-2.6-6.3" />
+    <path d="M21 4v5h-5" />
+  </Icon>
+);
 
 // ---------------------------------------------------------------------------
 // SHARED STYLES
 // ---------------------------------------------------------------------------
-
 const labelClass =
   "block text-xs font-medium text-text-secondary sm:text-[13px]";
 
 const fieldClass =
   "mt-1.5 w-full rounded-lg border border-line bg-surface-dark px-3 py-2.5 text-sm text-text-primary placeholder:text-text-secondary/70 outline-none transition focus:border-accent/60 focus:ring-2 focus:ring-accent/25";
 
+// ---------------------------------------------------------------------------
+// CATEGORY OPTIONS — updated to match the new site taxonomy
+// ---------------------------------------------------------------------------
 const CATEGORY_OPTIONS = [
-  { value: "pngs", label: "PNGs" },
-  { value: "backgrounds", label: "Backgrounds" },
-  { value: "animations", label: "Animations" },
-  { value: "sfx", label: "SFX" },
-  { value: "fonts", label: "Fonts" },
-  { value: "overlays", label: "Overlays" },
+  { value: "background-motion",    label: "Background motion" },
+  { value: "background-wallpaper", label: "Background wallpaper" },
+  { value: "trending-effect",      label: "Trending effect" },
+  { value: "sound-effects",        label: "Sound effects" },
+  { value: "transition-effect",    label: "Transition effect" },
 ];
 
 // ---------------------------------------------------------------------------
 // HELPERS
 // ---------------------------------------------------------------------------
-
-// Check whether a File looks like a supported asset.
 function isSupportedAsset(file) {
   const name = file.name || "";
   if (name.startsWith(".")) return false;
@@ -127,8 +129,6 @@ function isSupportedAsset(file) {
   return SUPPORTED_EXTENSIONS.has(ext);
 }
 
-// Turn a File into a queue item, using its filename (without extension)
-// as the initial asset title.
 function toQueueItem(file) {
   return {
     file,
@@ -138,7 +138,6 @@ function toQueueItem(file) {
   };
 }
 
-// "photo.PNG" -> "PNG"
 function fileExtension(filename) {
   if (!filename || !filename.includes(".")) return "";
   return filename.split(".").pop().toUpperCase();
@@ -147,28 +146,19 @@ function fileExtension(filename) {
 // ---------------------------------------------------------------------------
 // COMPONENT
 // ---------------------------------------------------------------------------
-
 export default function UploadForm() {
-  // Each item: { file, name, status, message }
-  // status: "pending" | "uploading" | "success" | "error"
   const [queue, setQueue] = useState([]);
-
-  // Count of files that were skipped because they didn't match the whitelist.
   const [skippedCount, setSkippedCount] = useState(0);
 
-  // Shared form fields applied to every file in the batch.
   const [category, setCategory] = useState("");
   const [description, setDescription] = useState("");
   const [tags, setTags] = useState("");
 
   const [isUploading, setIsUploading] = useState(false);
-  const [summary, setSummary] = useState(null); // { total, success, errors }
+  const [summary, setSummary] = useState(null);
 
-  // Two hidden inputs: one for files, one for folders.
   const filesInputRef = useRef(null);
   const folderInputRef = useRef(null);
-
-  // ---- Selection handling --------------------------------------------------
 
   function handleSelection(event) {
     const incoming = Array.from(event.target.files ?? []);
@@ -185,12 +175,9 @@ export default function UploadForm() {
       }
     }
 
-    // Append to the queue (so selecting another folder doesn't erase progress).
     setQueue((prev) => [...prev, ...accepted]);
     setSkippedCount((prev) => prev + skipped);
     setSummary(null);
-
-    // Reset the input so selecting the same files again re-triggers onChange.
     event.target.value = "";
   }
 
@@ -212,8 +199,6 @@ export default function UploadForm() {
     );
   }
 
-  // ---- Retry failed -------------------------------------------------------
-
   function handleRetryFailed() {
     setQueue((prev) =>
       prev.map((item) =>
@@ -224,8 +209,6 @@ export default function UploadForm() {
     );
     setSummary(null);
   }
-
-  // ---- Submit --------------------------------------------------------------
 
   async function handleSubmit(event) {
     event.preventDefault();
@@ -242,11 +225,9 @@ export default function UploadForm() {
     setIsUploading(true);
     setSummary(null);
 
-    // Work on a local copy so we can update it as we go.
     const working = [...queue];
 
     for (let i = 0; i < working.length; i++) {
-      // Skip anything that already succeeded in a previous pass.
       if (working[i].status === "success") continue;
 
       working[i] = { ...working[i], status: "uploading", message: "" };
@@ -299,7 +280,6 @@ export default function UploadForm() {
 
     setSummary({ total: working.length, success: successes, errors });
 
-    // If everything succeeded, clear the queue after a short delay.
     if (errors === 0) {
       setTimeout(() => {
         setQueue([]);
@@ -311,20 +291,16 @@ export default function UploadForm() {
     }
   }
 
-  // ---- Derived state -------------------------------------------------------
-
   const pendingCount = queue.filter((i) => i.status === "pending").length;
   const hasFailed = queue.some((i) => i.status === "error");
-  const allDone = queue.length > 0 && queue.every((i) => i.status === "success");
-
-  // ---- UI ------------------------------------------------------------------
+  const allDone =
+    queue.length > 0 && queue.every((i) => i.status === "success");
 
   return (
     <form
       onSubmit={handleSubmit}
       className="rounded-2xl border border-line bg-surface p-4 shadow-card sm:p-6"
     >
-      {/* Heading */}
       <div className="mb-4 sm:mb-5">
         <h2 className="text-base font-semibold tracking-tight text-text-primary sm:text-lg">
           Mass upload
@@ -341,7 +317,6 @@ export default function UploadForm() {
 
         {queue.length > 0 ? (
           <div className="mt-1.5 space-y-2">
-            {/* Summary bar */}
             <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2">
               <span className="text-xs font-medium text-text-primary sm:text-[13px]">
                 {queue.length} file{queue.length === 1 ? "" : "s"} ready
@@ -352,7 +327,6 @@ export default function UploadForm() {
                 )}
               </span>
               <div className="flex items-center gap-1">
-                {/* Add more files */}
                 <button
                   type="button"
                   onClick={() => filesInputRef.current?.click()}
@@ -380,14 +354,12 @@ export default function UploadForm() {
               </div>
             </div>
 
-            {/* Per-file list */}
             <ul className="max-h-64 space-y-1.5 overflow-y-auto rounded-lg border border-line bg-surface-dark p-2">
               {queue.map((item, i) => (
                 <li
                   key={i}
                   className="flex items-center gap-2 rounded-md px-2 py-1.5"
                 >
-                  {/* Status icon */}
                   <span className="shrink-0">
                     {item.status === "pending" && (
                       <FileIcon className="h-4 w-4 text-text-secondary" />
@@ -403,7 +375,6 @@ export default function UploadForm() {
                     )}
                   </span>
 
-                  {/* Name + info */}
                   <div className="min-w-0 flex-1">
                     {item.status === "pending" && !isUploading ? (
                       <input
@@ -423,7 +394,6 @@ export default function UploadForm() {
                     </p>
                   </div>
 
-                  {/* Remove */}
                   {!isUploading && item.status !== "success" && (
                     <button
                       type="button"
@@ -438,7 +408,6 @@ export default function UploadForm() {
               ))}
             </ul>
 
-            {/* Retry failed */}
             {hasFailed && !isUploading && (
               <button
                 type="button"
@@ -451,7 +420,6 @@ export default function UploadForm() {
             )}
           </div>
         ) : (
-          // ------------------ Empty state: pick files or folder ---------------
           <div className="mt-1.5 rounded-xl border border-dashed border-line-strong bg-surface-dark p-4 sm:p-5">
             <div className="flex flex-col items-center text-center">
               <div className="flex h-11 w-11 items-center justify-center rounded-full bg-accent/10 text-accent-soft">
@@ -494,7 +462,6 @@ export default function UploadForm() {
           </div>
         )}
 
-        {/* Hidden inputs */}
         <input
           ref={filesInputRef}
           id="asset-files"
@@ -505,9 +472,6 @@ export default function UploadForm() {
           className="sr-only"
         />
 
-        {/* webkitdirectory turns this input into a folder picker.
-            Browsers then return every file inside the selected folder
-            (and its subfolders) — never the folder itself. */}
         <input
           ref={folderInputRef}
           id="asset-folder"
@@ -573,7 +537,7 @@ export default function UploadForm() {
           value={tags}
           onChange={(e) => setTags(e.target.value)}
           disabled={isUploading}
-          placeholder="overlay, cinematic, loop"
+          placeholder="effect, loop, cinematic"
           className={fieldClass}
         />
       </div>
@@ -593,7 +557,10 @@ export default function UploadForm() {
           ) : (
             <>
               <UploadCloudIcon className="h-4 w-4" />
-              Upload {pendingCount > 0 ? `${pendingCount} file${pendingCount === 1 ? "" : "s"}` : "all"}
+              Upload{" "}
+              {pendingCount > 0
+                ? `${pendingCount} file${pendingCount === 1 ? "" : "s"}`
+                : "all"}
             </>
           )}
         </button>

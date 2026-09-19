@@ -2,6 +2,7 @@
 // POST /api/upload
 // Uploads the main file (and optional thumbnail) to Cloudinary,
 // then inserts a row into Supabase.
+
 import { NextResponse } from "next/server";
 import { revalidatePath, revalidateTag } from "next/cache";
 import { cloudinary, isCloudinaryConfigured } from "../../../lib/cloudinary";
@@ -27,7 +28,7 @@ export async function POST(request) {
   const category = formData.get("category");
   const description = formData.get("description");
   const tagsRaw = formData.get("tags");
-  const thumbnailFile = formData.get("thumbnail"); // optional
+  const thumbnailFile = formData.get("thumbnail");
 
   if (!file || typeof file === "string") {
     return jsonError(400, "missing_file", "No file was uploaded.");
@@ -54,8 +55,14 @@ export async function POST(request) {
     return jsonError(502, "cloudinary_upload_failed", err?.message || "Cloudinary upload failed.");
   }
 
-  // Preview priority: custom thumbnail > the image itself (only for images) > null.
-  // Video/audio/font without a custom thumbnail stay null — AssetThumbnail shows a type icon.
+  // ---------------------------------------------------------------------------
+  // PREVIEW URL
+  // Priority:
+  //   1. Custom thumbnail (if uploaded)
+  //   2. Image assets → use the image itself
+  //   3. Video assets → Cloudinary frame-extract URL (first frame as .jpg)
+  //   4. Audio/font → null (AssetThumbnail shows a type icon)
+  // ---------------------------------------------------------------------------
   let previewUrl = null;
 
   if (thumbnailFile && typeof thumbnailFile !== "string") {
@@ -68,11 +75,13 @@ export async function POST(request) {
       });
       previewUrl = thumbResult.secure_url;
     } catch (err) {
-      // Don't fail the whole upload if the thumbnail fails — just skip it.
       console.error("Thumbnail upload failed:", err?.message);
     }
   } else if (assetType === "png") {
     previewUrl = uploadResult.secure_url;
+  } else if (assetType === "video") {
+    // Cloudinary serves `<video-url>.jpg` as an automatic frame extract.
+    previewUrl = videoFrameUrl(uploadResult.secure_url);
   }
 
   const { data, error } = await supabaseAdmin
@@ -98,7 +107,6 @@ export async function POST(request) {
     return jsonError(500, "db_insert_failed", error.message);
   }
 
-  // Invalidate cached pages so the new asset appears immediately.
   revalidateTag("assets");
   revalidatePath("/");
   revalidatePath("/admin");
@@ -134,14 +142,11 @@ function jsonError(status, error, message) {
   );
 }
 
-// Single pass over the mime/filename instead of two separate functions
-// that each re-derived the same category.
 function classifyFile(mime, filename) {
   if (mime.startsWith("video/")) return { resourceType: "video", assetType: "video" };
-  if (mime.startsWith("audio/")) return { resourceType: "video", assetType: "audio" }; // Cloudinary treats audio as "video"
+  if (mime.startsWith("audio/")) return { resourceType: "video", assetType: "audio" };
   if (mime.startsWith("image/")) return { resourceType: "image", assetType: "png" };
   if (/\.(ttf|otf|woff2?)$/i.test(filename)) return { resourceType: "raw", assetType: "font" };
-  // Fallback for anything unrecognized — keeps prior behavior (treated as "png"/raw).
   return { resourceType: "raw", assetType: "png" };
 }
 
@@ -175,4 +180,15 @@ function uploadBufferToCloudinary(buffer, { folder, resourceType, publicId }) {
     );
     stream.end(buffer);
   });
+}
+
+// Convert a Cloudinary video URL into a JPG frame-extract URL.
+//   .../video/upload/v123/editor-treasury/clip.mp4
+//   .../video/upload/v123/editor-treasury/clip.jpg
+// Cloudinary renders the .jpg as the first frame automatically.
+function videoFrameUrl(videoUrl) {
+  if (!videoUrl || typeof videoUrl !== "string") return null;
+  if (!videoUrl.includes("res.cloudinary.com")) return null;
+  if (!videoUrl.includes("/video/upload/")) return null;
+  return videoUrl.replace(/\.[^/.]+$/, ".jpg");
 }

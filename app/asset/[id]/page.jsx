@@ -4,6 +4,10 @@
 import Link from "next/link";
 import AssetThumbnail from "../../../components/AssetThumbnail";
 import ViewTracker from "../../../components/ViewTracker";
+import FontPreview, {
+  buildFontFaceCss,
+  fontFamilyName,
+} from "../../../components/FontPreview";
 import { supabaseAdmin } from "../../../lib/supabase";
 
 export const revalidate = 300;
@@ -50,6 +54,15 @@ const DownloadIcon = ({ className }) => (
     <path d="M12 4v11" />
     <path d="m7 10.5 5 5 5-5" />
     <path d="M5 20h14" />
+  </Icon>
+);
+
+const WaveIcon = ({ className }) => (
+  <Icon className={className} strokeWidth={1.8}>
+    <path d="M4 12h2" />
+    <path d="M9 7v10" />
+    <path d="M14 4v16" />
+    <path d="M19 9v6" />
   </Icon>
 );
 
@@ -131,8 +144,14 @@ export default async function AssetDetailPage({ params }) {
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 pb-16 sm:px-6 sm:pb-20 lg:px-8">
-      {/* Records this view in localStorage for the "Recently viewed" strip. */}
       <ViewTracker asset={asset} />
+
+      {/* Inject the @font-face rule early so the "Aa" below renders in the
+          correct font as soon as the file arrives. font-display: swap means
+          the fallback text shows first, then swaps in — no blocking. */}
+      {type === "font" && (
+        <style dangerouslySetInnerHTML={{ __html: buildFontFaceCss(asset) }} />
+      )}
 
       {/* Top bar */}
       <header className="sticky top-0 z-30 -mx-4 border-b border-line/60 bg-background/80 px-4 backdrop-blur-md sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
@@ -161,20 +180,11 @@ export default async function AssetDetailPage({ params }) {
 
       <div className="pt-4 sm:pt-6 lg:pt-8">
         <div className="grid grid-cols-1 gap-5 lg:grid-cols-5 lg:gap-6">
-          {/* Preview + info */}
+          {/* ---------------- Preview + info ---------------- */}
           <div className="lg:col-span-3">
-            {/* Big preview — panel border */}
             <div className="rounded-2xl border border-line bg-surface/60 p-1 shadow-card">
               <div className="relative aspect-[4/3] w-full overflow-hidden rounded-xl bg-surface-dark ring-1 ring-inset ring-white/5 sm:aspect-video">
-                <AssetThumbnail
-                  src={asset.preview_url}
-                  alt={asset.title}
-                  type={type}
-                  iconClassName="h-16 w-16 text-white/80 sm:h-20 sm:w-20"
-                  objectFit="contain"
-                  width={1200}
-                  priority
-                />
+                <Preview asset={asset} type={type} />
 
                 <span
                   className={`absolute left-3 top-3 z-10 rounded-md px-2 py-1 text-[11px] font-semibold tracking-wider backdrop-blur-sm ${style.badge}`}
@@ -239,10 +249,9 @@ export default async function AssetDetailPage({ params }) {
             </div>
           </div>
 
-          {/* Sidebar */}
+          {/* ---------------- Sidebar ---------------- */}
           <aside className="lg:col-span-2">
             <div className="space-y-4 lg:sticky lg:top-20 lg:space-y-5">
-              {/* Download CTA panel */}
               <div className="rounded-2xl border border-line bg-surface/60 p-4 shadow-card sm:p-5">
                 <a
                   href={`/api/download?id=${asset.id}`}
@@ -251,18 +260,15 @@ export default async function AssetDetailPage({ params }) {
                   <DownloadIcon className="h-4 w-4" />
                   Download · {size}
                 </a>
-
                 <p className="mt-3 text-center text-[11px] text-text-secondary">
                   Free for personal and commercial use.
                 </p>
               </div>
 
-              {/* Metadata panel */}
               <div className="rounded-2xl border border-line bg-surface/60 p-4 shadow-card sm:p-5">
                 <h2 className="text-sm font-semibold text-text-primary">
                   Details
                 </h2>
-
                 <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
                   <MetaItem label="Type" value={style.label} />
                   <MetaItem label="Category" value={category} />
@@ -281,8 +287,81 @@ export default async function AssetDetailPage({ params }) {
             </div>
           </aside>
         </div>
+
+        {/* ---------------- Font preview (only for fonts) ---------------- */}
+        {type === "font" && <FontPreview asset={asset} />}
       </div>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// PREVIEW — different renderer per asset type
+// ---------------------------------------------------------------------------
+function Preview({ asset, type }) {
+  if (type === "video") {
+    return (
+      <video
+        src={asset.file_url}
+        controls
+        playsInline
+        preload="metadata"
+        poster={asset.preview_url || undefined}
+        className="absolute inset-0 h-full w-full object-contain"
+      />
+    );
+  }
+
+  if (type === "audio") {
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-6">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/15 text-emerald-300 sm:h-20 sm:w-20">
+          <WaveIcon className="h-7 w-7 sm:h-9 sm:w-9" />
+        </div>
+        <audio
+          src={asset.file_url}
+          controls
+          preload="metadata"
+          className="w-full max-w-md"
+        />
+      </div>
+    );
+  }
+
+  if (type === "font") {
+    // Big "Aa" rendered in the actual font, with the font name below.
+    const family = fontFamilyName(asset.id);
+    const style = { fontFamily: `"${family}", serif` };
+
+    return (
+      <div className="absolute inset-0 flex flex-col items-center justify-center px-6 text-center">
+        <p
+          className="text-7xl leading-none text-white/95 sm:text-8xl lg:text-9xl"
+          style={style}
+        >
+          Aa
+        </p>
+        <p
+          className="mt-3 max-w-full truncate text-lg text-white/60 sm:text-2xl"
+          style={style}
+        >
+          {asset.title}
+        </p>
+      </div>
+    );
+  }
+
+  // Default: image
+  return (
+    <AssetThumbnail
+      src={asset.preview_url}
+      alt={asset.title}
+      type={type}
+      iconClassName="h-16 w-16 text-white/80 sm:h-20 sm:w-20"
+      objectFit="contain"
+      width={1200}
+      priority
+    />
   );
 }
 
@@ -314,14 +393,12 @@ function NotFoundState() {
             <BackIcon className="h-4 w-4" />
             <span className="hidden sm:inline">Back</span>
           </Link>
-
           <Link
             href="/"
             className="hidden items-center gap-2 text-sm font-semibold tracking-tight text-text-primary outline-none transition hover:text-accent-soft focus-visible:ring-2 focus-visible:ring-accent/60 sm:flex"
           >
             Porus<span className="text-accent-soft">Visuals</span>
           </Link>
-
           <div className="w-9" />
         </div>
       </header>
@@ -335,14 +412,12 @@ function NotFoundState() {
               <path d="m3 17 9 5 9-5" />
             </Icon>
           </div>
-
           <h1 className="mt-4 text-lg font-semibold tracking-tight text-text-primary sm:text-xl">
             Asset not found
           </h1>
           <p className="mx-auto mt-2 max-w-[34ch] text-sm leading-relaxed text-text-secondary">
             This asset doesn't exist or hasn't been published.
           </p>
-
           <Link
             href="/"
             className="mt-6 inline-flex items-center gap-1.5 rounded-xl bg-accent px-4 py-2.5 text-sm font-semibold text-white outline-none transition hover:bg-accent-dark focus-visible:ring-2 focus-visible:ring-accent/60 active:scale-[0.99]"

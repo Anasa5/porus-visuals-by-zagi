@@ -67,7 +67,16 @@ const IconAll = ({ className }) => (
   </Icon>
 );
 
-const IconImage = ({ className }) => (
+// Background motion — play arrow inside a frame
+const IconMotion = ({ className }) => (
+  <Icon className={className}>
+    <rect x="3" y="4" width="18" height="16" rx="2.5" />
+    <path d="M10 9.2v5.6l4.5-2.8L10 9.2Z" fill="currentColor" stroke="none" />
+  </Icon>
+);
+
+// Background wallpaper — picture with sun + mountain
+const IconWallpaper = ({ className }) => (
   <Icon className={className}>
     <rect x="3" y="4" width="18" height="16" rx="2.5" />
     <circle cx="9" cy="10" r="1.5" />
@@ -75,28 +84,15 @@ const IconImage = ({ className }) => (
   </Icon>
 );
 
-const IconGrid = ({ className }) => (
+// Trending effect — flame
+const IconFlame = ({ className }) => (
   <Icon className={className}>
-    <rect x="3" y="3" width="8" height="8" rx="1.5" />
-    <rect x="13" y="3" width="8" height="8" rx="1.5" />
-    <rect x="3" y="13" width="8" height="8" rx="1.5" />
-    <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    <path d="M12 3s5 4.5 5 9a5 5 0 0 1-10 0c0-1.7.8-3.2 1.8-4.3" />
+    <path d="M12 20a2.5 2.5 0 0 0 2.5-2.5c0-1.5-2.5-4-2.5-4s-2.5 2.5-2.5 4A2.5 2.5 0 0 0 12 20Z" />
   </Icon>
 );
 
-const IconSparkle = ({ className }) => (
-  <Icon className={className}>
-    <path d="M12 3v4" />
-    <path d="M12 17v4" />
-    <path d="M3 12h4" />
-    <path d="M17 12h4" />
-    <path d="m5.6 5.6 2.8 2.8" />
-    <path d="m15.6 15.6 2.8 2.8" />
-    <path d="m18.4 5.6-2.8 2.8" />
-    <path d="m8.4 15.6-2.8 2.8" />
-  </Icon>
-);
-
+// Sound effects — audio wave
 const IconWave = ({ className }) => (
   <Icon className={className} strokeWidth={2}>
     <path d="M4 12h2" />
@@ -106,19 +102,13 @@ const IconWave = ({ className }) => (
   </Icon>
 );
 
-const IconFont = ({ className }) => (
+// Transition effect — two arrows swapping
+const IconTransition = ({ className }) => (
   <Icon className={className}>
-    <path d="M5 19 10 5l5 14" />
-    <path d="M6.5 14.5h7" />
-    <path d="M17 12.5h3" />
-    <path d="M18.5 11v8" />
-  </Icon>
-);
-
-const IconFlame = ({ className }) => (
-  <Icon className={className}>
-    <path d="M12 3s5 4.5 5 9a5 5 0 0 1-10 0c0-1.7.8-3.2 1.8-4.3" />
-    <path d="M12 20a2.5 2.5 0 0 0 2.5-2.5c0-1.5-2.5-4-2.5-4s-2.5 2.5-2.5 4A2.5 2.5 0 0 0 12 20Z" />
+    <path d="M4 8h13" />
+    <path d="m14 5 3 3-3 3" />
+    <path d="M20 16H7" />
+    <path d="m10 13-3 3 3 3" />
   </Icon>
 );
 
@@ -126,33 +116,22 @@ const IconFlame = ({ className }) => (
 // CATEGORIES
 // ---------------------------------------------------------------------------
 const CATEGORIES = [
-  { label: "All",         value: null,          Icon: IconAll },
-  { label: "PNGs",        value: "pngs",        Icon: IconImage },
-  { label: "Backgrounds", value: "backgrounds", Icon: IconGrid },
-  { label: "Animations",  value: "animations",  Icon: IconSparkle },
-  { label: "SFX",         value: "sfx",         Icon: IconWave },
-  { label: "Fonts",       value: "fonts",       Icon: IconFont },
-  { label: "Trending",    value: "trending",    Icon: IconFlame },
+  { label: "All",                  value: null,                  Icon: IconAll },
+  { label: "Background motion",    value: "background-motion",    Icon: IconMotion },
+  { label: "Background wallpaper", value: "background-wallpaper", Icon: IconWallpaper },
+  { label: "Trending effect",      value: "trending-effect",      Icon: IconFlame },
+  { label: "Sound effects",        value: "sound-effects",        Icon: IconWave },
+  { label: "Transition effect",    value: "transition-effect",    Icon: IconTransition },
 ];
-
-const SORT_LABELS = {
-  newest: "Newest",
-  oldest: "Oldest",
-  downloads: "Most downloaded",
-  az: "A–Z",
-};
 
 // ---------------------------------------------------------------------------
 // URL HELPERS
 // ---------------------------------------------------------------------------
-
-// URLs can carry a param multiple times (?q=a&q=b) — take the first.
 function firstParam(value) {
   if (Array.isArray(value)) return value[0];
   return typeof value === "string" ? value : "";
 }
 
-// Build a homepage URL from a state object. Omits defaults so links stay clean.
 function buildUrl({ category, q, sort, show }) {
   const sp = new URLSearchParams();
   if (category) sp.set("category", category);
@@ -163,7 +142,6 @@ function buildUrl({ category, q, sort, show }) {
   return qs ? `/?${qs}` : "/";
 }
 
-// Strip characters that would break PostgREST's .or() filter syntax.
 function sanitizeSearchTerm(q) {
   return q.replace(/[,()]/g, " ").trim();
 }
@@ -176,15 +154,15 @@ const CARDS_COLUMNS =
 
 const getCachedAssets = unstable_cache(
   async (category, search, sort, show) => {
-    if (!supabaseAdmin) return [];
+    if (!supabaseAdmin) return { rows: [], hasMore: false };
 
     let query = supabaseAdmin
       .from("assets")
       .select(CARDS_COLUMNS)
       .eq("is_published", true);
 
-    // Category filter (skip "all" and "trending" — trending is a sort, not a filter)
-    if (category && category !== "all" && category !== "trending") {
+    // Category filter — every category is now a real filter (no "trending" special case).
+    if (category && category !== "all") {
       query = query.eq("category", category);
     }
 
@@ -195,8 +173,8 @@ const getCachedAssets = unstable_cache(
       );
     }
 
-    // Sort
-    if (category === "trending" || sort === "downloads") {
+    // Sort — independent of category now.
+    if (sort === "downloads") {
       query = query.order("download_count", { ascending: false });
     } else if (sort === "oldest") {
       query = query.order("uploaded_at", { ascending: true });
@@ -207,7 +185,6 @@ const getCachedAssets = unstable_cache(
       query = query.order("uploaded_at", { ascending: false });
     }
 
-    // Fetch one extra to know whether a "Load more" button is needed.
     const { data, error } = await query.limit(show + 1);
 
     if (error) {
@@ -239,6 +216,8 @@ function toCardShape(row) {
   };
 }
 
+// "background-motion" → "Background-motion" (kept as-is if no match found —
+// we rely on CATEGORIES for the human label in section titles).
 function capitalize(str) {
   if (!str) return "";
   return str.charAt(0).toUpperCase() + str.slice(1);
@@ -246,14 +225,15 @@ function capitalize(str) {
 
 function labelForCategory(value) {
   const found = CATEGORIES.find((c) => c.value === value);
-  return found ? found.label : "All";
+  if (found) return found.label;
+  // Fallback: make "some-thing" look human-ish.
+  return value ? value.replace(/-/g, " ") : "All";
 }
 
 // ---------------------------------------------------------------------------
 // PAGE
 // ---------------------------------------------------------------------------
 export default async function HomePage({ searchParams }) {
-  // Read URL state
   const rawCategory = firstParam(searchParams?.category);
   const rawQ = firstParam(searchParams?.q);
   const rawSort = firstParam(searchParams?.sort);
@@ -271,7 +251,6 @@ export default async function HomePage({ searchParams }) {
     Math.min(parseInt(rawShow, 10) || PAGE_SIZE, 240)
   );
 
-  // Fetch
   const safeSearch = q ? sanitizeSearchTerm(q) : "";
   const { rows, hasMore } = await getCachedAssets(
     category ?? "all",
@@ -284,7 +263,7 @@ export default async function HomePage({ searchParams }) {
   const activeLabel = labelForCategory(category);
   const state = { category, q, sort, show };
 
-  // Section title logic
+  // Section title logic — no more "trending" special case.
   let sectionTitle;
   let sectionSubtitle;
 
@@ -294,9 +273,6 @@ export default async function HomePage({ searchParams }) {
       assets.length === 0
         ? "No matches"
         : `${assets.length} result${assets.length === 1 ? "" : "s"}`;
-  } else if (category === "trending") {
-    sectionTitle = "Trending";
-    sectionSubtitle = "Most downloaded";
   } else if (category) {
     sectionTitle = activeLabel;
     sectionSubtitle = `Everything in ${activeLabel}`;
@@ -336,7 +312,7 @@ export default async function HomePage({ searchParams }) {
               Categories
             </Link>
             <Link
-              href="/?category=trending"
+              href="/?sort=downloads"
               className="rounded-lg px-3 py-2 text-sm text-text-secondary transition hover:bg-surface hover:text-text-primary"
             >
               Trending
@@ -382,11 +358,10 @@ export default async function HomePage({ searchParams }) {
             </h1>
 
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-text-secondary sm:mt-4 sm:text-base">
-              A curated library of PNGs, backgrounds, animations, overlays, SFX,
-              and fonts — built for video and content editors.
+              A curated library of background motion, wallpapers, effects,
+              sound, and transitions — built for video and content editors.
             </p>
 
-            {/* Search form — GET submit, preserves other URL params via hidden inputs */}
             <form
               id="search"
               action="/"
@@ -401,7 +376,7 @@ export default async function HomePage({ searchParams }) {
                 type="text"
                 name="q"
                 defaultValue={q ?? ""}
-                placeholder="Search light leaks, SFX, fonts…"
+                placeholder="Search effects, wallpapers, sounds…"
                 className="min-w-0 flex-1 bg-transparent py-2 text-sm text-text-primary placeholder:text-text-secondary focus:outline-none"
               />
               <button
@@ -431,7 +406,6 @@ export default async function HomePage({ searchParams }) {
             <div className="flex w-max gap-2 px-1">
               {CATEGORIES.map(({ label, value, Icon: CategoryIcon }) => {
                 const isActive = (category ?? null) === value;
-                // Changing category resets pagination, keeps search + sort.
                 const href = buildUrl({
                   category: value,
                   q,
@@ -463,7 +437,6 @@ export default async function HomePage({ searchParams }) {
       {/* ASSETS */}
       <section id="latest" className="mt-4 scroll-mt-20 sm:mt-5">
         <div className="overflow-hidden rounded-2xl border border-line bg-surface/60 shadow-card">
-          {/* Header */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-line px-4 py-3.5 sm:px-6 sm:py-5">
             <div className="min-w-0">
               <h2 className="truncate text-base font-semibold tracking-tight text-text-primary sm:text-lg">
@@ -492,7 +465,6 @@ export default async function HomePage({ searchParams }) {
             </div>
           </div>
 
-          {/* Content */}
           <div className="p-4 sm:p-6">
             {assets.length === 0 ? (
               <div className="rounded-xl border border-dashed border-line-strong bg-background/40 px-6 py-10 text-center sm:py-12">
@@ -531,7 +503,6 @@ export default async function HomePage({ searchParams }) {
                   ))}
                 </div>
 
-                {/* Load more */}
                 {hasMore && (
                   <div className="mt-6 flex justify-center sm:mt-8">
                     <Link
@@ -547,7 +518,6 @@ export default async function HomePage({ searchParams }) {
                   </div>
                 )}
 
-                {/* End-of-list note */}
                 {!hasMore && assets.length >= PAGE_SIZE && (
                   <p className="mt-6 text-center text-xs text-text-secondary sm:mt-8">
                     You've reached the end.
